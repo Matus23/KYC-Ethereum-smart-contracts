@@ -1,19 +1,34 @@
 pragma solidity >=0.4.22 <0.6.0;
 
 /*
- * This contract simulates the Know-Your-Customer process that needs to be 
+ * This contract simulates Robust Know-Your-Customer process that needs to be 
  * executed by financial institutions before conducting business with a customer
- * It uses Ethereum blockchain in order to decrease the financial costs associated with process.
- * It assumes blockchain it is implemented on is private and is only accessible by the regulator
+ * The contract should be deployed on a private permissioned blockchain
+ * @author - Matus Drgon
 */
 
 contract KYC {
-    
-    /**
+
+     /** Customer profile
      * @property document_package_hash - hash of the customer's document package
+     * @property id - customer's unique id
+     * @property registered - determines whether a customer has been rgistered by a fin. inst.
+     * @property require_update - if true, customer's KYC requires to be updated (set by regulator)
+     * @property update_in_progress - if true, customer's KYC update being executed by a financial institution 
+     * @property customer_balance - represents balance of each customer that is to be redistributed between the fin. inst. 
+                                    operating with the customer in a fair way  
+     * @property kyc_price - cost of executing a single KYC for this customer   
+     * @property cumulative_kyc_cost - cumulative cost of executing KYC's for this customer  
+     * @property repeat_probability - probability with which KYC ought to be repeated  
+     * @property kyc_count - counts # fin. inst. operating with this customer
+     * @property rating_average - average rating of this customer describing how satisfied fin. inst. are with the customer
+     * @property rating_cumulative - sum of all ratings assigned to this customer by fin. inst. operating with the customer 
+     * @property rating_count - # fin. inst. that assigned rating to this customer  
+     * @property ratings - ratings of the customer as assigned by fin. inst. operating with the customer (mapping: bank account id => rating value)
      */ 
     struct Customer {
         bytes32 document_package_hash;
+        uint id;
         bool registered;
         bool require_update;
         bool update_in_progress;
@@ -22,10 +37,10 @@ contract KYC {
         uint cumulative_kyc_cost;
         uint repeat_probability;
         uint kyc_count;
-        uint rating_average;                    // average rating describing how satisfied fin. inst. with the customer
+        uint rating_average;                   
         uint rating_cumulative;
-        uint rating_count;                      // because some institutions might not give customer rating
-        mapping (uint => uint) ratings;         // mapping: bank account id => rating value
+        uint rating_count;                      
+        mapping (uint => uint) ratings;         
     }
 
     /**
@@ -63,6 +78,7 @@ contract KYC {
     // mapping of bank account address to id of the account
     mapping (address => uint) address_to_id;
 
+    // initial value for update constant
     uint public update_constant = 1;
 
     /**
@@ -94,6 +110,7 @@ contract KYC {
         uint _customer_id
     );
 
+
     /**************************************************** 
      ********************* Modifiers ********************
      ****************************************************/
@@ -113,6 +130,7 @@ contract KYC {
      * Produces a random number between <0, 100>, both ends of the interval included
      * @param customer_id - id of the customer the bank is operating with
      * @param account_id  - id of a bank account the bank is using to operate with the customer
+     * @param doc_package - hash of the customer's document package
      */
     function get_random_number(uint customer_id, uint account_id, bytes32 doc_package) private view returns (uint8) {
        return uint8(uint256(keccak256(abi.encodePacked(now, block.difficulty, customer_id, account_id, doc_package)))%101);
@@ -127,23 +145,38 @@ contract KYC {
     
     /**
      * Generates a random number serving as id for the bank
+     * Utility function that can be used if financial institutions did not want to create IDs themeselves
      */ 
     function get_id() private view returns(uint) {
         return uint256(keccak256(abi.encodePacked(now, block.difficulty)));
     }
 
+    /**
+     * Sets single KYC-execution cost for a customer
+     * Currently settable only by the central authority (contract owner)
+     */ 
     function set_KYC_cost(uint kyc_price, uint customer_id) public only_owner {
         customers[customer_id].kyc_price = kyc_price;
     }
     
-    function set_update_constant(uint new_value) public only_owner {
+    /**
+     * Sets update constant. 
+     * update_constant * kyc_price == maximal possible cost of a single update for this customer
+     * @param new_value - new value of the update constant
+     */ 
+    function set_update_constant(uint new_value) public {
         update_constant = new_value;
     }
 
+
     /**
-     * Creates a customer
+     * Creates a customer profile for a real customer that approached a financial institution
+     * Executed only by the 1st institution this customer approached
+     * @param account_id  - id of account the institution uses to operate with the customer
      * @param customer_id - customer's id
      * @param kyc_cost    - average cost of executing KYC for this customer
+     * @param repeat_probability - probability with which the process needs to be repeated for the customer 
+     * @param doc_package_hash - hash of the document package for the customer
      */ 
     function create_customer(uint account_id, uint customer_id, uint kyc_cost, uint repeat_probability, bytes32 doc_package_hash) public payable {
         // require unique customer id
@@ -159,7 +192,7 @@ contract KYC {
         account_ids[account_id] = true;
 
         // create new customer
-        customers[customer_id] = Customer(doc_package_hash, true, false, false, 0, kyc_cost * 1 ether, kyc_cost * 1 ether, repeat_probability, 0, 0, 0, 0);
+        customers[customer_id] = Customer(doc_package_hash, customer_id, true, false, false, 0, kyc_cost * 1 ether, kyc_cost * 1 ether, repeat_probability, 0, 0, 0, 0);
 
         // increase number of customers
         customers_length++;
@@ -182,6 +215,11 @@ contract KYC {
         onboarded_list_length[customer_id]++;
     }
 
+
+    /**
+     * Sets customer's flag that determines whether KYC is being updated for the customer
+     * @param customer_id - update is being executed for the specified customer 
+     */ 
     function set_customer_update_flag(uint customer_id) public {
         uint account_id = address_to_id[msg.sender];
         uint account_index = account_indices[account_id];
@@ -194,6 +232,12 @@ contract KYC {
         customers[customer_id].update_in_progress = true;
     }
 
+    
+    /**
+     * Sets flag that determines whether update needs to be executed for the customer
+     * @param customer_id - id of the customer
+     * @param flag_value - value of the flag
+     */ 
     function require_customer_update(uint customer_id, bool flag_value) public only_owner{
         customers[customer_id].require_update = flag_value;
         
@@ -203,7 +247,16 @@ contract KYC {
         }
     }
 
+
+    /**
+     * Updates hash of a customer's document package 
+     * @param customer_id - customer's id 
+     * @param doc_package_hash - hash of the document package 
+     * @param update_cost - cost of executing this update for the customer
+     */ 
     function update_KYC_doc_package(uint customer_id, bytes32 doc_package_hash, uint update_cost) public {
+        
+        // retrieve bank's account id & index
         uint account_id = address_to_id[msg.sender];
         uint account_index = account_indices[account_id];
         
@@ -212,9 +265,9 @@ contract KYC {
         // require that the updated flag is set to true 
         require(customers[customer_id].update_in_progress == true, "Customer's KYC process flag was not set to true");
         // require that the bank account is operating with the customer 
-        require(onboarded_list[customer_id][account_index].account_address==msg.sender, "This bank account is not operating with the customer");
+        require(onboarded_list[customer_id][account_index].account_address == msg.sender, "This bank account is not operating with the customer");
         // require update cost is smaller than single KYC cost for the customer
-        require(update_cost <= customers[customer_id].kyc_price * update_constant, "Update cost has to be lower than ");
+        require(update_cost <= customers[customer_id].kyc_price * update_constant, "Update cost has to be lower than maximal update price");
         // require a new document package hash 
         require(customers[customer_id].document_package_hash != doc_package_hash, "Document package hash is unchanged to the existing one");
         
@@ -240,13 +293,20 @@ contract KYC {
         customers[customer_id].require_update     = false;
     }
     
+    
+    /**
+     * Sets rating for a customer by a financial institution 
+     * @param account_id - bank's account id 
+     * @param customer_id - customer's id
+     * @param rating_value - value of rating (1-10) for the customer
+     */ 
     function assign_customer_rating(uint account_id, uint customer_id, uint rating_value) public {
         // retrieve account index
         uint account_index = account_indices[account_id];
         
-        // bank account must be consistent with the message sender
+        // bank account must be operating with the customer
         require(onboarded_list[customer_id][account_index].account_address == msg.sender);
-        
+    
         // rating between 1-10
         require( 1 <= rating_value && rating_value <= 10);
         
@@ -258,6 +318,7 @@ contract KYC {
         customers[customer_id].rating_count++;
         customers[customer_id].rating_average = customers[customer_id].rating_cumulative / customers[customer_id].rating_count;
     }
+    
     
     /**
      * Equally distributes balance of a given customer between all onboarded institutions of this customer 
@@ -291,8 +352,11 @@ contract KYC {
     
     /**
      * Enters bank account of a financial institution into onboarded list of the given customer
+     * @param customer_id - customer's id
+     * @param account_id - bank's account id 
      */ 
     function enter_customers_onboarded_list(uint customer_id, uint account_id) public payable {
+        
         // require each bank account to have a unique account id
         require(account_ids[account_id] == false);
         // check that given bank account not already operating with the customer
@@ -351,6 +415,7 @@ contract KYC {
         }
     }
 
+
     /**
      * Checks whether a given bank account is already on a given customer's onboarded list
      * Note: same account id might be used when requested by a different bank account (i.e. with
@@ -369,6 +434,7 @@ contract KYC {
         return true;
     }
 
+
     /**
      * Debtor - pays the debt
      * Debtee - is owed the debt
@@ -378,6 +444,7 @@ contract KYC {
      * @param debtee_account_id - bank's account id of bank that is owed
      * @param debtor_account_id - bank's account id of bank that owes 
      * @param customer_id       - id of customer for whom this is relevant
+     * @param debtee_address    - address of the bank's account that is owed 
      */
     function pay_debt(uint debtee_account_id, uint debtor_account_id, uint customer_id, address payable debtee_address) public payable 
     {
@@ -399,9 +466,12 @@ contract KYC {
         }
     }
     
+    
     /**
-     * Helper function to check whether contract works as expected
-     * Will be deleted for final implementation
+     * Retrieves value of debt between two financial institution in reference to a customer 
+     * @param debtee_account_id - bank's account id of bank that is owed 
+     * @param debtor_account_id - bank's account id of bank that owes 
+     * @param customer_id - customer's id 
      */ 
     function get_debt_value(uint debtee_account_id, uint debtor_account_id, uint customer_id) public {
         for (uint account_ind=0; account_ind < onboarded_list[customer_id].length; account_ind++) {

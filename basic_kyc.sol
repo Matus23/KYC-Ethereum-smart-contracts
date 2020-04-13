@@ -1,14 +1,19 @@
 pragma solidity >=0.4.22 <0.6.0;
 
 /*
- * This contract simulates the Know-Your-Customer process that needs to be 
+ * This contract simulates Basic Know-Your-Customer process that needs to be 
  * executed by financial institutions before conducting business with a customer.
+ * The contract should be deployed on a private permissioned blockchain
+ * @author - Matus Drgon
 */
 
 contract KYC {
     
     /**
      * @property document_package_hash - hash of the customer's document package
+     * @property registered - determines whether a customer has been rgistered by a fin. inst.
+     * @property customer_balance - represents balance of each customer that is to be redistributed between the fin. inst. 
+                                operating with the customer in a fair way  
      */ 
     struct Customer {
         bytes32 document_package;
@@ -19,6 +24,7 @@ contract KYC {
     /**
      * @property account_address - public key of account the bank is using for dealing with a customer
      * @property id - unique identificator for the bank account
+     * @property exists - whether this bank account is registered
      */ 
     struct BankAccount {
         address payable account_address;
@@ -29,8 +35,8 @@ contract KYC {
     // average price of executing KYC - set by home bank
     uint public KYC_PRICE = 1 ether;
 
-    // contract owner == home_bank
-    address payable private home_bank;
+    // contract owner == regulator
+    address payable private regulator;
 
     // each customer has a list of onboarded financial institutions operating with them
     mapping (uint => BankAccount[]) public onboarded_list;
@@ -44,7 +50,7 @@ contract KYC {
      * Constructor initialises address of the contract owner
      */ 
     constructor() public payable {
-        home_bank = msg.sender;
+        regulator = msg.sender;
     }
 
     /**************************************************** 
@@ -52,7 +58,7 @@ contract KYC {
      ****************************************************/
     
     modifier only_owner{
-        require(msg.sender == home_bank, 
+        require(msg.sender == regulator, 
                 "Function callable only by the home bank (contract owner)");
         _;
     }
@@ -62,14 +68,15 @@ contract KYC {
      ****************************************************/
     
     /**
-     *  Sets average KYC price - executable only by regulator
+     * Sets average KYC price - executable only by regulator
+     * @param price - single KYC execution cost
      */
     function set_kyc_price(uint256 price) public only_owner {
         KYC_PRICE = price * 1 ether;
     }
     
     /**
-     * Creates a customer
+     * Creates a customer's blockchain profile
      * @param id - customer's id
      */ 
     function create_customer(uint id) public {
