@@ -26,6 +26,7 @@ contract KYC {
      * @property rating_cumulative - sum of all ratings assigned to this customer by fin. inst. operating with the customer 
      * @property rating_count - # fin. inst. that assigned rating to this customer  
      * @property ratings - ratings of the customer as assigned by fin. inst. operating with the customer (mapping: bank account id => rating value)
+     * @property banks - stores IDs of banks that executed or updated the KYC process for this customer
      */ 
     struct Customer {
         bytes32 document_package_hash;
@@ -41,7 +42,8 @@ contract KYC {
         uint rating_average;                   
         uint rating_cumulative;
         uint rating_count;                      
-        mapping (uint => uint) ratings;         
+        mapping (uint => uint) ratings;        
+        mapping (uint => bool) banks; 
     }
 
     /**
@@ -253,6 +255,9 @@ contract KYC {
         // increase counter 
         customers[customer_id].kyc_count++;
 
+        // store that bank with bank_id executed KYC for this customer
+        customers[customer_id].banks[bank_id] = true;
+
         // increment balance assigned to the customer
         customers[customer_id].customer_balance += msg.value;
         
@@ -362,6 +367,7 @@ contract KYC {
 
         // bank with bank_id is now a part of executing the KYC process for this customer
         banks[bank_id].kyc_executions[customer_id] = true;
+        customers[customer_id].banks[bank_id] = true;
     }
     
     /**
@@ -506,8 +512,9 @@ contract KYC {
             // increase counter 
             customers[customer_id].kyc_count++;
 
-            // this bank is now a part of executing KYC for this customer
+            // store that this bank is now a part of executing KYC for this customer
             banks[bank_id].kyc_executions[customer_id] = true;
+            customers[customer_id].banks[bank_id] = true;
 
             // emit an event to repeat KYC
             emit RepeatKYC(account_id, customers[customer_id].document_package_hash);
